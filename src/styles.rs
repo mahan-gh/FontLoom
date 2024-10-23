@@ -121,13 +121,17 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
 
     if use_image_bg {
         let mut img: DynamicImage;
-        let width: u32;
-        let height: u32;
+        let mut width: u32;
+        let mut height: u32;
+
+        let mut attempts = 0;
+        let max_attempts = 10;
 
         (img, width, height) = select_image(images).await?;
 
-        while width <= 350 || height <= 350 {
-            let (img, width, height) = select_image(&images).await?;
+        while (width <= 350 || height <= 350) && attempts < max_attempts {
+            (img, width, height) = select_image(&images).await?;
+            attempts += 1;
         }
 
         let crop_width = thread_rng().gen_range(350..=width.min(1500));
@@ -135,21 +139,7 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
 
         let left = thread_rng().gen_range(0..(width - crop_width + 1));
         let top = thread_rng().gen_range(0..(height - crop_height + 1));
-        // Check if the range for 'left' and 'top' is valid
-        // let left: u32;
-        // if width > crop_width {
-        //     left = thread_rng().gen_range(0..(width - crop_width + 1));
-        // } else {
-        //     // Handle the case where the crop width is larger or equal to the width
-        //     left = 0; // or handle appropriately
-        // }
-        // let top: u32;
-        // if height > crop_height {
-        //     top = thread_rng().gen_range(0..(height - crop_height + 1));
-        // } else {
-        //     // Handle the case where the crop height is larger or equal to the height
-        //     top = 0; // or handle appropriately
-        // }
+
         let cropped_image = img.crop(left, top, crop_width, crop_height);
         let mut buffer = Cursor::new(Vec::new());
         cropped_image

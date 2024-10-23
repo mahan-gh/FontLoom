@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text Image</title>
+    <style>
+      @font-face {
+          font-family: '{font_name}';
+          src: url(data:font/ttf;base64,{base64_font}) format('truetype');
+      }
+      body {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+          background: transparent;
+          font-family: '{font_name}';
+          {body_styles}
+        }
+        .text-container {
+          {text_styles}
+        }
+    </style>
+  </head>
+  <body>
+    <div class="text-container">{phrase}</div>
+  </body>
+</html>

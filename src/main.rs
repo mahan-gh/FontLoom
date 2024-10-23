@@ -10,14 +10,11 @@ use rand::{thread_rng, Rng};
 use serde_json::Value;
 use tokio::fs as async_fs;
 use tokio::sync::Semaphore;
-// use tokio::task;
-// use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::PathBuf;
-// use std::ffi::OsStr;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,7 +23,7 @@ const SEMAPHORES: usize = 12;
 const CLASSES_LENGTH: usize = 100;
 const OUTPUT_DIR: &str = "./data";
 const FONTS_DIR: &str = "../dataGenerator/fonts_test";
-const TEMPLATE_PATH: &str = "../dataGenerator/index_rs.html";
+const TEMPLATE_PATH: &str = "./index.html";
 const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
 const IMAGE_FOLDER: &str = "../dataGenerator/background";
 
