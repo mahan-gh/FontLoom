@@ -1,5 +1,5 @@
 [package]
-name = "dataGen-rs"
+name = "FontLoom"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,7 +10,6 @@ image = "0.24"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.16"
 serde_json = "1.0"
-
 colored = "2.0"
-headless_chrome = "1.0.15"
 futures = "0.3.31"
+headless_chrome = "1.0.15"

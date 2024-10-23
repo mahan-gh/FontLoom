@@ -1,15 +1,13 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{
-    DynamicImage, GenericImageView, ImageBuffer, ImageError, ImageOutputFormat, Pixel, Rgb,
-};
+use image::{DynamicImage, GenericImageView, ImageBuffer, ImageOutputFormat, Pixel, Rgb};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use std::io::Cursor;
-use std::path::{Path, PathBuf};
 use tokio::fs as async_fs;
 use tokio::fs::File as AsyncFile;
 use tokio::io::AsyncReadExt;
-// use tokio::path::Path;
+
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
 
 type Color = (u8, u8, u8);
 
