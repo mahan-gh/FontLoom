@@ -16,20 +16,28 @@ fn random_color() -> Color {
     (rng.gen(), rng.gen(), rng.gen())
 }
 
-fn ensure_contrast(c1: Color, c2: Color, threshold: f64) -> bool {
-    color_distance(c1, c2) > threshold
+fn calc_mean_color(c1: &Color, c2: &Color) -> Color {
+    (
+        ((c1.0 as u16 + c2.0 as u16) / 2) as u8,
+        ((c1.1 as u16 + c2.1 as u16) / 2) as u8,
+        ((c1.2 as u16 + c2.2 as u16) / 2) as u8,
+    )
 }
 
-fn color_distance(c1: Color, c2: Color) -> f64 {
+fn ensure_contrast(c1: &Color, c2: &Color, threshold: &f64) -> bool {
+    color_distance(c1, c2) > *threshold
+}
+
+fn color_distance(c1: &Color, c2: &Color) -> f64 {
     let (r1, g1, b1) = c1;
     let (r2, g2, b2) = c2;
-    ((r1 as f64 - r2 as f64).powi(2)
-        + (g1 as f64 - g2 as f64).powi(2)
-        + (b1 as f64 - b2 as f64).powi(2))
+    ((*r1 as f64 - *r2 as f64).powi(2)
+        + (*g1 as f64 - *g2 as f64).powi(2)
+        + (*b1 as f64 - *b2 as f64).powi(2))
     .sqrt()
 }
 
-fn relative_luminance(rgb: Color) -> f64 {
+fn relative_luminance(rgb: &Color) -> f64 {
     let (r, g, b) = rgb;
     let channel_luminance = |c: f64| {
         let c = c / 255.0;
@@ -39,12 +47,12 @@ fn relative_luminance(rgb: Color) -> f64 {
             ((c + 0.055) / 1.055).powf(2.4)
         }
     };
-    0.2126 * channel_luminance(r as f64)
-        + 0.7152 * channel_luminance(g as f64)
-        + 0.0722 * channel_luminance(b as f64)
+    0.2126 * channel_luminance(*r as f64)
+        + 0.7152 * channel_luminance(*g as f64)
+        + 0.0722 * channel_luminance(*b as f64)
 }
 
-fn contrast_ratio(rgb1: Color, rgb2: Color) -> f64 {
+fn contrast_ratio(rgb1: &Color, rgb2: &Color) -> f64 {
     let lum1 = relative_luminance(rgb1);
     let lum2 = relative_luminance(rgb2);
     let (lighter, darker) = if lum1 > lum2 {
@@ -55,11 +63,11 @@ fn contrast_ratio(rgb1: Color, rgb2: Color) -> f64 {
     (lighter + 0.05) / (darker + 0.05)
 }
 
-fn ensure_wcag_contrast(bg_color: Color, text_color: Color, ratio: f64) -> bool {
-    contrast_ratio(bg_color, text_color) >= ratio
+fn ensure_wcag_contrast(bg_color: &Color, text_color: &Color, ratio: &f64) -> bool {
+    contrast_ratio(bg_color, text_color) >= *ratio
 }
 
-fn calc_mean(buffer: &[u8]) -> Result<Color, String> {
+fn calc_mean_image(buffer: &[u8]) -> Result<Color, String> {
     let img =
         image::load_from_memory(buffer).map_err(|e| (format!("Failed to load image: {}", e)))?;
     let (r_sum, g_sum, b_sum, pixel_count) = img.pixels().fold(
@@ -107,7 +115,7 @@ async fn select_image(images: &Vec<PathBuf>) -> Result<(image::DynamicImage, u32
         .await
         .map_err(|_| "Error reading image file".to_string())?;
 
-    let mut img: image::DynamicImage =
+    let img: image::DynamicImage =
         image::load_from_memory(&buffer).map_err(|e| format!("Failed to load image: {}", e))?;
     let (width, height) = img.dimensions();
 
@@ -116,6 +124,7 @@ async fn select_image(images: &Vec<PathBuf>) -> Result<(image::DynamicImage, u32
 
 async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, String), String> {
     let use_image_bg = thread_rng().gen_bool(0.5);
+    let use_overlay = thread_rng().gen_bool(0.3); // Add probability for an overlay
 
     if use_image_bg {
         let mut img: DynamicImage;
@@ -132,8 +141,8 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
             attempts += 1;
         }
 
-        let crop_width = thread_rng().gen_range(350..=width.min(1500));
-        let crop_height = thread_rng().gen_range(350..=height.min(1500));
+        let crop_width = thread_rng().gen_range(380..=width.min(1500));
+        let crop_height = thread_rng().gen_range(380..=height.min(1500));
 
         let left = thread_rng().gen_range(0..(width - crop_width + 1));
         let top = thread_rng().gen_range(0..(height - crop_height + 1));
@@ -145,14 +154,33 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
             .map_err(|e| format!("Failed to write image: {}", e))?;
 
         let base64_cropped = STANDARD.encode(&buffer.get_ref()[..]);
-        let bg_style = format!(
+        let mut bg_style = format!(
             "background-image: url(data:image/png;base64,{}); background-size: cover; background-position: center;",
             base64_cropped
         );
 
-        let bg_color = calc_mean(buffer.get_ref()).map_err(|e| format!("Error: {}", e))?;
+        // Add overlay pattern on top of the image
+        if use_overlay {
+            let overlay_color = random_color();
+            let opacity = thread_rng().gen_range(0.05..0.35);
+            bg_style = format!(
+                "{} background: linear-gradient(rgba({},{},{},{}), rgba({},{},{},{})), {}",
+                bg_style,
+                overlay_color.0,
+                overlay_color.1,
+                overlay_color.2,
+                opacity,
+                overlay_color.0,
+                overlay_color.1,
+                overlay_color.2,
+                opacity,
+                bg_style
+            );
+        }
+
         let mut text_color = random_color();
-        while !ensure_wcag_contrast(bg_color, text_color, 3.0) {
+        let bg_color = calc_mean_image(buffer.get_ref()).map_err(|e| format!("Error: {}", e))?;
+        while !ensure_wcag_contrast(&bg_color, &text_color, &3.0) {
             text_color = random_color();
         }
 
@@ -164,22 +192,48 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
             ),
         ))
     } else {
-        let bg_color = random_color();
-        let mut text_color = random_color();
-        while !ensure_wcag_contrast(bg_color, text_color, 3.0) {
-            text_color = random_color();
-        }
+        let use_gradient = thread_rng().gen_bool(0.3); // 30% chance to use gradient
 
-        Ok((
-            format!(
-                "background-color: #{:02x}{:02x}{:02x};",
-                bg_color.0, bg_color.1, bg_color.2
-            ),
-            format!(
-                "#{:02x}{:02x}{:02x}",
-                text_color.0, text_color.1, text_color.2
-            ),
-        ))
+        if use_gradient {
+            let color1 = random_color();
+            let color2 = random_color();
+
+            let mean_color = calc_mean_color(&color1, &color1);
+            let mut text_color = random_color();
+            // while !ensure_wcag_contrast(color1, text_color, 3.0)
+            //     || !ensure_wcag_contrast(color2, text_color, 3.0)
+            // {
+            while !ensure_wcag_contrast(&mean_color, &text_color, &3.0) {
+                text_color = random_color();
+            }
+            Ok((
+                format!(
+                    "background: linear-gradient(45deg, #{:02x}{:02x}{:02x}, #{:02x}{:02x}{:02x});",
+                    color1.0, color1.1, color1.2, color2.0, color2.1, color2.2
+                ),
+                format!(
+                    "#{:02x}{:02x}{:02x}",
+                    text_color.0, text_color.1, text_color.2
+                ),
+            ))
+        } else {
+            let bg_color = random_color();
+
+            let mut text_color = random_color();
+            while !ensure_wcag_contrast(&bg_color, &text_color, &3.0) {
+                text_color = random_color();
+            }
+            Ok((
+                format!(
+                    "background-color: #{:02x}{:02x}{:02x};",
+                    bg_color.0, bg_color.1, bg_color.2
+                ),
+                format!(
+                    "#{:02x}{:02x}{:02x}",
+                    text_color.0, text_color.1, text_color.2
+                ),
+            ))
+        }
     }
 }
 
@@ -238,15 +292,18 @@ fn generate_style_properties() -> String {
         .join(" ");
 
     let width = thread_rng().gen_range(250..=600);
-    let height = thread_rng().gen_range(200..=500);
-    let font_size = thread_rng().gen_range(30..=100);
+    let height = thread_rng().gen_range(200..=450);
+    let font_size = thread_rng().gen_range(32..=100);
     let text_align = ["center", "left", "right"]
         .choose(&mut thread_rng())
         .unwrap();
 
+    let padding = thread_rng().gen_range(10..=40);
+    let margin = thread_rng().gen_range(20..=60);
+
     format!(
-        "width: {}px; height: {}px; font-size: {}px; text-align: {}; transform: {}; filter: {};",
-        width, height, font_size, text_align, transform, filter
+        "width: {}px; height: {}px; font-size: {}px; text-align: {}; transform: {}; filter: {}; padding: {}px; margin: {}px;",
+        width, height, font_size, text_align, transform, filter, padding, margin
     )
 }
 fn generate_shadow_style(bg_style: &str, text_color: &str) -> String {
@@ -254,9 +311,11 @@ fn generate_shadow_style(bg_style: &str, text_color: &str) -> String {
         let bg_color = parse_color(bg_style);
         let text_color = parse_color(text_color);
         let mut shadow_color = random_color();
-        while !ensure_contrast(bg_color, shadow_color, 3.0)
-            || !ensure_contrast(text_color, shadow_color, 3.0)
-        {
+        let mean_color = calc_mean_color(&bg_color, &text_color);
+        while !ensure_contrast(&mean_color, &shadow_color, &3.0) {
+            // while !ensure_contrast(bg_color, shadow_color, 3.0)
+            //     || !ensure_contrast(text_color, shadow_color, 3.0)
+            // {
             shadow_color = random_color();
         }
 
@@ -277,9 +336,11 @@ fn generate_outline_style(bg_style: &str, text_color: &str) -> String {
         let bg_color = parse_color(bg_style);
         let text_color = parse_color(text_color);
         let mut outline_color = random_color();
-        while !ensure_contrast(bg_color, outline_color, 3.0)
-            || !ensure_contrast(text_color, outline_color, 3.0)
-        {
+        let mean_color = calc_mean_color(&bg_color, &text_color);
+        while !ensure_contrast(&mean_color, &outline_color, &3.0) {
+            // while !ensure_contrast(bg_color, outline_color, 3.0)
+            //     || !ensure_contrast(text_color, outline_color, 3.0)
+            // {
             outline_color = random_color();
         }
 
