@@ -9,7 +9,7 @@ use headless_chrome::{Browser, LaunchOptions, Tab};
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 use tokio::fs as async_fs;
-use tokio::sync::{Mutex as tokio_Mutex, Semaphore};
+use tokio::sync::Semaphore;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -29,7 +29,7 @@ const TEMPLATE_PATH: &str = "./index.html";
 const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
 const IMAGE_FOLDER: &str = "../dataGenerator/background";
 const CHROME_PATH: &str = "../chromium/chrome.exe123";
-const BROWSER_IDLE_TIME: Duration = std::time::Duration::new(30000, 0);
+const BROWSER_IDLE_TIME: Duration = std::time::Duration::new(10000, 0);
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -167,8 +167,8 @@ fn create_browser() -> Browser {
 
 async fn process_font(
     font: &str,
-    phrase_assignments: &Vec<String>, // Arc allows sharing without cloning
-    html_template: &String,           // Use Arc for shared ownership
+    phrase_assignments: &Vec<String>,
+    html_template: &String,
     images: &Vec<PathBuf>,
     // browser: &tokio_Mutex<Browser>,
     // tab: &Tab,

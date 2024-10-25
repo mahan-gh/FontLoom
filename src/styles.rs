@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 type Color = (u8, u8, u8);
 
+const IMAGE_MINIMUM_DIMENSION: u32 = 350;
+
 fn random_color() -> Color {
     let mut rng = thread_rng();
     (rng.gen(), rng.gen(), rng.gen())
@@ -124,25 +126,27 @@ async fn select_image(images: &Vec<PathBuf>) -> Result<(image::DynamicImage, u32
 
 async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, String), String> {
     let use_image_bg = thread_rng().gen_bool(0.5);
-    let use_overlay = thread_rng().gen_bool(0.3); // Add probability for an overlay
+    let use_overlay = thread_rng().gen_bool(0.3);
 
     if use_image_bg {
         let mut img: DynamicImage;
         let mut width: u32;
         let mut height: u32;
 
-        let mut attempts = 0;
-        let max_attempts = 10;
+        // let mut attempts = 0;
+        // let max_attempts = 10;
 
         (img, width, height) = select_image(images).await?;
 
-        while (width <= 350 || height <= 350) && attempts < max_attempts {
+        while (width <= IMAGE_MINIMUM_DIMENSION || height <= IMAGE_MINIMUM_DIMENSION)
+        // && attempts < max_attempts
+        {
             (img, width, height) = select_image(&images).await?;
-            attempts += 1;
+            // attempts += 1;
         }
 
-        let crop_width = thread_rng().gen_range(380..=width.min(1500));
-        let crop_height = thread_rng().gen_range(380..=height.min(1500));
+        let crop_width = thread_rng().gen_range(IMAGE_MINIMUM_DIMENSION..=width.min(1500));
+        let crop_height = thread_rng().gen_range(IMAGE_MINIMUM_DIMENSION..=height.min(1500));
 
         let left = thread_rng().gen_range(0..(width - crop_width + 1));
         let top = thread_rng().gen_range(0..(height - crop_height + 1));
@@ -381,22 +385,16 @@ fn parse_color(color_str: &str) -> Color {
 }
 
 async fn generate_random_styles(images: &Vec<PathBuf>) -> Result<String, String> {
-    // Step 1: Generate background style and text color
     let (bg_style, text_color_hex) = generate_background_style(&images).await?;
 
-    // Step 2: Generate other style properties
     let style_properties = generate_style_properties();
 
-    // Step 3: Generate shadow style
     let shadow_style = generate_shadow_style(&bg_style, &text_color_hex);
 
-    // Step 4: Generate outline style
     let outline_style = generate_outline_style(&bg_style, &text_color_hex);
 
-    // Step 5: Generate noise style
     let noise_style = generate_noise_style();
 
-    // Combine all styles into one CSS string
     let styles = format!(
         "
         {}
