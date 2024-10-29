@@ -1,14 +1,18 @@
 mod styles;
 use crate::styles::create_html_content;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use colored::*;
 use futures::future::join_all;
 use headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption;
 use headless_chrome::types::Bounds;
 use headless_chrome::{Browser, LaunchOptions, Tab};
+use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serde_json::Value;
 use tokio::fs as async_fs;
+use tokio::fs::File as AsyncFile;
+use tokio::io::AsyncReadExt;
 use tokio::sync::Semaphore;
 
 use std::collections::HashMap;
@@ -22,9 +26,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SEMAPHORES: usize = 9;
-const CLASSES_LENGTH: usize = 300;
+const CLASSES_LENGTH: usize = 100;
 const OUTPUT_DIR: &str = "./data";
-const FONTS_DIR: &str = "../dataGenerator/fonts_test";
+const FONTS_DIR: &str = "./fonts";
 const TEMPLATE_PATH: &str = "./index.html";
 const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
 const IMAGE_FOLDER: &str = "../dataGenerator/background";
@@ -32,6 +36,28 @@ const CHROME_PATH: &str = "../chromium/chrome.exe123";
 const BROWSER_IDLE_TIME: Duration = std::time::Duration::new(10000, 0);
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+async fn convert_font_to_base64(font_path: &str) -> Result<String, std::io::Error> {
+    let mut file = AsyncFile::open(font_path).await?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).await?;
+    let encoded = STANDARD.encode(&buffer);
+
+    Ok(encoded)
+}
+
+async fn initialize_fonts(font_dir: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    let mut font_data = Vec::new();
+    let mut font_files = async_fs::read_dir(font_dir).await?;
+
+    // Asynchronously iterate over each font file in directory, convert to Base64, and store
+    while let Some(entry) = font_files.next_entry().await? {
+        let base64_font = convert_font_to_base64(entry.path().to_str().unwrap()).await?;
+        font_data.push(base64_font);
+    }
+
+    Ok(font_data)
+}
 
 async fn recreate_output_dir(
     dir: &str,
@@ -87,21 +113,6 @@ fn assign_phrases_to_fonts(
     }
 
     assignments
-}
-
-async fn read_font_files(font_dir: &str) -> Result<Vec<PathBuf>, Box<dyn Error + Send + Sync>> {
-    let mut font_files = Vec::new();
-    let mut dir_entries = async_fs::read_dir(font_dir).await?;
-
-    while let Some(entry) = dir_entries.next_entry().await? {
-        font_files.push(entry.path());
-    }
-
-    if font_files.is_empty() {
-        return Err(format!("No font files found in directory: {}", font_dir).into());
-    }
-
-    Ok(font_files)
 }
 
 async fn get_image_paths() -> Result<Vec<PathBuf>, String> {
@@ -174,7 +185,7 @@ async fn process_font(
     // tab: &Tab,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let font_dir = format!("{}/{}", FONTS_DIR, font);
-    let font_files = read_font_files(&font_dir).await?;
+    let base64_fonts = initialize_fonts(&font_dir).await?;
 
     let browser = create_browser();
     // let browser = browser.lock().await;
@@ -182,15 +193,15 @@ async fn process_font(
 
     // Loop through each phrase for the current font
     for phrase in phrase_assignments {
-        let font_file = font_files[thread_rng().gen_range(0..font_files.len())]
-            .to_str()
-            .ok_or("Failed to convert font file path to string")?;
+        let base64_font = base64_fonts.choose(&mut thread_rng()).unwrap();
 
-        let html_content = create_html_content(&html_template, phrase, font_file, images, None)
-            .await
-            .expect("failed to generate html content");
+        let html_content =
+            create_html_content(&font, &html_template, &phrase, &base64_font, &images, None)
+                // create_html_content(&font, &html_template, &phrase, &font_file, &images, None)
+                .await
+                .expect("failed to generate html content");
 
-        if let Err(e) = create_image(&tab, &html_content, font).await {
+        if let Err(e) = create_image(&tab, &html_content, &font).await {
             eprintln!("Error creating image for font {}: {}", font, e);
             continue;
         }

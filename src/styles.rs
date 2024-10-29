@@ -3,11 +3,9 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, ImageOutputFormat, Pixe
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use tokio::fs as async_fs;
-use tokio::fs::File as AsyncFile;
-use tokio::io::AsyncReadExt;
 
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 type Color = (u8, u8, u8);
 
@@ -138,7 +136,7 @@ async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, Str
 
         (img, width, height) = select_image(images).await?;
 
-        while (width <= IMAGE_MINIMUM_DIMENSION || height <= IMAGE_MINIMUM_DIMENSION)
+        while width <= IMAGE_MINIMUM_DIMENSION || height <= IMAGE_MINIMUM_DIMENSION
         // && attempts < max_attempts
         {
             (img, width, height) = select_image(&images).await?;
@@ -302,8 +300,8 @@ fn generate_style_properties() -> String {
         .choose(&mut thread_rng())
         .unwrap();
 
-    let padding = thread_rng().gen_range(10..=40);
-    let margin = thread_rng().gen_range(20..=60);
+    let padding = thread_rng().gen_range(5..=50);
+    let margin = thread_rng().gen_range(5..=50);
 
     format!(
         "width: {}px; height: {}px; font-size: {}px; text-align: {}; transform: {}; filter: {}; padding: {}px; margin: {}px;",
@@ -411,62 +409,42 @@ async fn generate_random_styles(images: &Vec<PathBuf>) -> Result<String, String>
     Ok(styles + &noise_style)
 }
 
-async fn convert_font_to_base64(font_path: &str) -> Result<String, std::io::Error> {
-    let mut file = AsyncFile::open(font_path).await?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).await?;
-    let encoded = STANDARD.encode(&buffer);
-
-    Ok(encoded)
-}
-
 pub async fn create_html_content(
+    font_name: &str,
     template: &str,
     phrase: &str,
-    font_file: &str,
+    base64_font: &str,
     images: &Vec<PathBuf>,
     method: Option<&str>,
-) -> Result<String, std::io::Error> {
-    // Use &Path instead of allocating a new PathBuf object
-    let font_path = Path::new(font_file);
-
-    let font_name = font_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("default_font"); // No need to convert to String here
-
-    // Directly convert the font to base64 without unnecessary allocation
-    let base64_font = convert_font_to_base64(font_file).await?;
-
-    // Generate styles based on the method option
+) -> Result<String, String> {
     let styles = match method {
         Some("simple") => {
             "background-color: white; color: black; text-align: center; font-size: 50px;"
         }
+        // _ => generate_random_styles(&images).await?,
         _ => &match generate_random_styles(&images).await {
-            Ok(style_string) => style_string, // Return the owned String directly
-            Err(_) => "default-style".to_string(), // Fallback to a default owned String
+            Ok(style_string) => style_string,
+            Err(_) => format!("failed to generate styles for {}", font_name),
         },
     };
 
-    // Generate a random value to choose between two HTML content versions
-    let random_value = thread_rng().gen_range(0..2);
+    let text_styling = thread_rng().gen_bool(0.5);
 
     // Build the HTML content with less string replacement operations
-    let html_content = if random_value == 0 {
+    let html_content = if text_styling {
         template
-            .replace("{phrase}", phrase)
+            .replace("{phrase}", &phrase)
             .replace("{base64_font}", &base64_font)
-            .replace("{font_name}", font_name)
-            .replace("{text_styles}", styles)
+            .replace("{font_name}", &font_name)
+            .replace("{text_styles}", &styles)
             .replace("{body_styles}", "")
     } else {
         template
-            .replace("{phrase}", phrase)
+            .replace("{phrase}", &phrase)
             .replace("{base64_font}", &base64_font)
-            .replace("{font_name}", font_name)
+            .replace("{font_name}", &font_name)
             .replace("{text_styles}", "")
-            .replace("{body_styles}", styles)
+            .replace("{body_styles}", &styles)
     };
 
     Ok(html_content)
