@@ -25,10 +25,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+const BROKEN_FONTS: [&str; 8] = [
+    "divani", "jadid", "anjoman", "arya", "nazanin", "amir", "yekan", "dana",
+];
+
 const SEMAPHORES: usize = 9;
-const CLASSES_LENGTH: usize = 100;
+const CLASSES_LENGTH: usize = 5;
 const OUTPUT_DIR: &str = "./data";
-const FONTS_DIR: &str = "./fonts";
+const FONTS_DIR: &str = "../dataGenerator/fonts";
 const TEMPLATE_PATH: &str = "./index.html";
 const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
 const IMAGE_FOLDER: &str = "../dataGenerator/background";
@@ -46,14 +50,19 @@ async fn convert_font_to_base64(font_path: &str) -> Result<String, std::io::Erro
     Ok(encoded)
 }
 
-async fn initialize_fonts(font_dir: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-    let mut font_data = Vec::new();
+// async fn initialize_fonts(font_dir: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+async fn initialize_fonts(
+    font_dir: &str,
+) -> Result<HashMap<String, String>, Box<dyn Error + Send + Sync>> {
+    let mut font_data: HashMap<String, String> = HashMap::new();
+    // let mut font_data = Vec::new();
     let mut font_files = async_fs::read_dir(font_dir).await?;
 
     // Asynchronously iterate over each font file in directory, convert to Base64, and store
     while let Some(entry) = font_files.next_entry().await? {
         let base64_font = convert_font_to_base64(entry.path().to_str().unwrap()).await?;
-        font_data.push(base64_font);
+        // font_data.push(base64_font);
+        font_data.insert(entry.file_name().into_string().unwrap(), base64_font);
     }
 
     Ok(font_data)
@@ -77,8 +86,13 @@ async fn get_available_fonts(fonts_dir: &str) -> Result<Vec<String>, Box<dyn Err
     let paths = fs::read_dir(fonts_dir)?;
     let mut fonts = Vec::new();
     for path in paths {
-        if let Ok(entry) = path {
-            fonts.push(entry.file_name().into_string().unwrap());
+        // path.as_ref();
+        let font_dir = path.as_ref().unwrap().file_name().clone();
+        let font_dir = font_dir.to_str().unwrap();
+        if BROKEN_FONTS.contains(&font_dir) {
+            if let Ok(entry) = path {
+                fonts.push(entry.file_name().into_string().unwrap());
+            }
         }
     }
     Ok(fonts)
@@ -193,17 +207,19 @@ async fn process_font(
 
     // Loop through each phrase for the current font
     for phrase in phrase_assignments {
-        let base64_font = base64_fonts.choose(&mut thread_rng()).unwrap();
+        // let base64_font = base64_fonts.choose(&mut thread_rng()).unwrap();
 
-        let html_content =
-            create_html_content(&font, &html_template, &phrase, &base64_font, &images, None)
-                // create_html_content(&font, &html_template, &phrase, &font_file, &images, None)
-                .await
-                .expect("failed to generate html content");
+        for (font_name, base64_font) in base64_fonts.iter() {
+            let html_content =
+                create_html_content(&font, &html_template, &phrase, &base64_font, &images, None)
+                    // create_html_content(&font, &html_template, &phrase, &font_file, &images, None)
+                    .await
+                    .expect("failed to generate html content");
 
-        if let Err(e) = create_image(&tab, &html_content, &font).await {
-            eprintln!("Error creating image for font {}: {}", font, e);
-            continue;
+            if let Err(e) = create_image(&tab, &html_content, &font, &font_name).await {
+                eprintln!("Error creating image for font {}: {}", font, e);
+                continue;
+            }
         }
     }
 
@@ -216,13 +232,19 @@ async fn process_font(
     ))
 }
 
-async fn create_image(tab: &Tab, html_content: &str, font: &str) -> Result<(), Box<dyn Error>> {
+async fn create_image(
+    tab: &Tab,
+    html_content: &str,
+    font: &str,
+    font_name: &str,
+) -> Result<(), Box<dyn Error>> {
     let width = thread_rng().gen_range(400..1000) as f64;
     let height = thread_rng().gen_range(400..1000) as f64;
     let quality = thread_rng().gen_range(65..100);
 
     let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let output_image = format!("{}/{}/{}.jpg", OUTPUT_DIR, font, counter);
+    let output_image = format!("{}/{}/{}_{}.jpg", OUTPUT_DIR, font, font_name, counter);
+    // let output_image = format!("{}/{}/{}.jpg", OUTPUT_DIR, font, counter);
 
     tab.set_bounds(Bounds::Normal {
         left: None,
