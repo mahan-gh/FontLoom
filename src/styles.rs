@@ -421,16 +421,23 @@ pub async fn create_html_content(
         Some("simple") => {
             "background-color: white; color: black; text-align: center; font-size: 50px;"
         }
-        // _ => generate_random_styles(&images).await?,
-        _ => &match generate_random_styles(&images).await {
-            Ok(style_string) => style_string,
-            Err(_) => format!("failed to generate styles for {}", font_name),
-        },
+        _ => {
+            if thread_rng().gen_range(1..8) == 5 {
+                &format!(
+                    "background-color: white; color: black; text-align: center; font-size: {}px;",
+                    thread_rng().gen_range(12..60)
+                )
+            } else {
+                &match generate_random_styles(&images).await {
+                    Ok(style_string) => style_string,
+                    Err(_) => format!("failed to generate styles for {}", font_name),
+                }
+            }
+        }
     };
 
     let text_styling = thread_rng().gen_bool(0.5);
 
-    // Build the HTML content with less string replacement operations
     let html_content = if text_styling {
         template
             .replace("{phrase}", &phrase)

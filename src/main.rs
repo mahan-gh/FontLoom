@@ -46,7 +46,7 @@ async fn convert_font_to_base64(font_path: &str) -> Result<String, std::io::Erro
     Ok(encoded)
 }
 
-async fn initialize_fonts(font_dir: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+async fn get_font_vector(font_dir: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     let mut font_data = Vec::new();
     let mut font_files = async_fs::read_dir(font_dir).await?;
 
@@ -185,7 +185,7 @@ async fn process_font(
     // tab: &Tab,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let font_dir = format!("{}/{}", FONTS_DIR, font);
-    let base64_fonts = initialize_fonts(&font_dir).await?;
+    let base64_fonts = get_font_vector(&font_dir).await?;
 
     let browser = create_browser();
     // let browser = browser.lock().await;
@@ -197,7 +197,6 @@ async fn process_font(
 
         let html_content =
             create_html_content(&font, &html_template, &phrase, &base64_font, &images, None)
-                // create_html_content(&font, &html_template, &phrase, &font_file, &images, None)
                 .await
                 .expect("failed to generate html content");
 
@@ -211,7 +210,7 @@ async fn process_font(
 
     Ok(format!(
         "{} {}!",
-        "Successfully created data for".green(),
+        "Created the data for".green(),
         font.red()
     ))
 }
@@ -237,7 +236,6 @@ async fn create_image(tab: &Tab, html_content: &str, font: &str) -> Result<(), B
     tab.evaluate(js.as_str(), true)
         .map_err(|e| format!("Failed to inject HTML: {}", e))?;
 
-    // Capture screenshot with error handling
     let screenshot = tab
         .capture_screenshot(
             CaptureScreenshotFormatOption::Jpeg,
@@ -247,7 +245,6 @@ async fn create_image(tab: &Tab, html_content: &str, font: &str) -> Result<(), B
         )
         .map_err(|e| format!("Failed to capture screenshot: {}", e))?;
 
-    // Write file with error handling
     async_fs::write(&output_image, &screenshot)
         .await
         .map_err(|e| format!("Failed to write image file {}: {}", output_image, e))?;
@@ -291,9 +288,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let font = font.clone();
         let tx = tx.clone();
 
-        // let handle: tokio::task::JoinHandle<
-        //     Result<(), tokio::sync::mpsc::error::SendError<(usize, (bool, String))>>,
-        // > = tokio::spawn(async move {
         let handle = tokio::spawn(async move {
             let _permit = semaphore.acquire().await.unwrap();
 
@@ -305,7 +299,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let result = if let Some(phrases) = phrase_assignments.get(&font) {
                 match process_font(&font, &phrases, &html_template, &images).await {
-                    Ok(msg) => (true, format!("Success: {}", msg)),
+                    Ok(msg) => (true, format!("result: {}", msg)),
                     Err(e) => (false, format!("Error: {}", e)),
                 }
             } else {
@@ -313,8 +307,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             };
 
             let _ = tx.send((index, result)).await;
-
-            // Ok(())
         });
 
         handles.push(handle);
@@ -345,10 +337,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let progress = (completed as f32 / total_tasks as f32 * 100.0) as u32;
 
             println!(
-                "({}%) Task {} completed in {:?}: {}",
+                "({}%) Task {} completed in {:?}s. {}",
                 progress,
                 index + 1,
-                task_duration,
+                (task_duration.as_secs_f64() * 100.0).round() / 100.0,
                 result
             );
         }
@@ -363,7 +355,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     drop(tx);
     printer_handle.await?;
 
-    println!("Total time elapsed: {:?}", start.elapsed());
+    let elapsed = start.elapsed();
+    let minutes = elapsed.as_secs() / 60;
+    let seconds = elapsed.as_secs() % 60;
+    println!(
+        "Total time elapsed: {} minutes and {} seconds.",
+        minutes, seconds
+    );
+
     println!("{}", "All tasks completed!".cyan());
 
     Ok(())
