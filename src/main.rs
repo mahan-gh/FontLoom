@@ -25,13 +25,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const SEMAPHORES: usize = 9;
-const CLASSES_LENGTH: usize = 100;
-const OUTPUT_DIR: &str = "./data";
-const FONTS_DIR: &str = "./fonts";
+const SEMAPHORES: usize = 32;
+const CLASSES_LENGTH: usize = 300;
+const OUTPUT_DIR: &str = "../data";
+const FONTS_DIR: &str = "../fonts";
 const TEMPLATE_PATH: &str = "./index.html";
-const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
-const IMAGE_FOLDER: &str = "../dataGenerator/background";
+const PHRASES_PATH: &str = "../texts/phrases.json";
+const IMAGE_FOLDER: &str = "../background";
 const CHROME_PATH: &str = "../chromium/chrome.exe123";
 const BROWSER_IDLE_TIME: Duration = std::time::Duration::new(10000, 0);
 
