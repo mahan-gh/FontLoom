@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio::fs as async_fs;
 use tokio::fs::File as AsyncFile;
 use tokio::io::AsyncReadExt;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -22,13 +22,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const SEMAPHORES: usize = 9;
-const CLASSES_LENGTH: usize = 20;
+const IMAGES_PER_FONT: usize = 10;
 const OUTPUT_DIR: &str = "./data";
-const FONTS_DIR: &str = "../dataGenerator/fonts";
+const FONTS_DIR: &str = "./fonts";
 const TEMPLATE_PATH: &str = "./index.html";
 const PHRASES_PATH: &str = "../dataGenerator/texts/phrases.json";
 const IMAGE_FOLDER: &str = "../dataGenerator/background";
@@ -98,7 +98,7 @@ async fn load_phrases(file_path: &str) -> Result<Vec<String>, Box<dyn Error + Se
 fn assign_phrases_to_fonts(
     fonts: &[String],
     phrases: &[String],
-    limit: &usize,
+    limit: usize,
 ) -> HashMap<String, Vec<String>> {
     let mut assignments: HashMap<String, Vec<String>> = HashMap::new();
     let mut font_cycle = fonts.iter().cycle();
@@ -106,7 +106,7 @@ fn assign_phrases_to_fonts(
     for phrase in phrases {
         if let Some(font) = font_cycle.next() {
             let font_entry = assignments.entry(font.clone()).or_insert(Vec::new());
-            if font_entry.len() < *limit {
+            if font_entry.len() < limit {
                 font_entry.push(phrase.clone());
             }
         }
@@ -181,15 +181,18 @@ async fn process_font(
     phrase_assignments: &Vec<String>,
     html_template: &String,
     images: &Vec<PathBuf>,
-    // browser: &tokio_Mutex<Browser>,
+    browser: Arc<Mutex<Browser>>,
     // tab: &Tab,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let font_dir = format!("{}/{}", FONTS_DIR, font);
     let base64_fonts = get_font_vector(&font_dir).await?;
 
-    let browser = create_browser();
-    // let browser = browser.lock().await;
-    let tab = browser.new_tab()?;
+    let tab: Option<Arc<Tab>>;
+    {
+        let browser = browser.lock().await;
+        tab = Some(browser.new_tab()?);
+    }
+    let tab = tab.unwrap();
 
     // Loop through each phrase for the current font
     for phrase in phrase_assignments {
@@ -218,7 +221,7 @@ async fn process_font(
 async fn create_image(tab: &Tab, html_content: &str, font: &str) -> Result<(), Box<dyn Error>> {
     let width = thread_rng().gen_range(400..1000) as f64;
     let height = thread_rng().gen_range(400..1000) as f64;
-    let quality = thread_rng().gen_range(65..100);
+    let quality = thread_rng().gen_range(75..100);
 
     let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
     let output_image = format!("{}/{}/{}.jpg", OUTPUT_DIR, font, counter);
@@ -252,53 +255,59 @@ async fn create_image(tab: &Tab, html_content: &str, font: &str) -> Result<(), B
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn async_main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let start = Instant::now();
 
-    let available_fonts = get_available_fonts(FONTS_DIR).await?;
-    recreate_output_dir(OUTPUT_DIR, &available_fonts).await?;
-    let html_template = async_fs::read_to_string(TEMPLATE_PATH).await?;
-    let phrase_list = load_phrases(PHRASES_PATH).await?;
-    let phrase_assignments =
-        assign_phrases_to_fonts(&available_fonts, &phrase_list, &CLASSES_LENGTH);
-    let images = get_image_paths().await?;
-    // let browser = create_browser();
+    // --- Parallel Startup I/O ---
+    let (fonts_result, template_result, phrases_result, images_result) = tokio::join!(
+        get_available_fonts(FONTS_DIR),
+        async_fs::read_to_string(TEMPLATE_PATH),
+        load_phrases(PHRASES_PATH),
+        get_image_paths()
+    );
 
-    // Share the font and phrase data across threads safely with Arc
+    // Handle results
+    let available_fonts = fonts_result?;
+    let html_template = template_result?;
+    let phrase_list = phrases_result?;
+    let images = images_result?;
+
+    // Dependent setup operations
+    recreate_output_dir(OUTPUT_DIR, &available_fonts).await?;
+    let phrase_assignments: HashMap<String, Vec<String>> =
+        assign_phrases_to_fonts(&available_fonts, &phrase_list, IMAGES_PER_FONT);
+
+    // --- End Parallel Startup ---
+
+    // Share data with Arc
     let images = Arc::new(images);
     let html_template = Arc::new(html_template);
     let available_fonts = Arc::new(available_fonts);
     let phrase_assignments = Arc::new(phrase_assignments);
     let semaphore = Arc::new(Semaphore::new(SEMAPHORES));
-    // let browser = Arc::new(tokio_Mutex::new(create_browser()));
+    let browser = Arc::from(Mutex::from(create_browser()));
 
     let total_tasks = available_fonts.len();
-    let (tx, mut rx) = tokio::sync::mpsc::channel(total_tasks);
+
+    // --- Simplified channel (no Duration) ---
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(usize, (bool, String))>(total_tasks);
     let mut handles = Vec::new();
-    let task_starts = Arc::new(Mutex::new(HashMap::new())); // Wrap task_starts in Arc<Mutex>
 
     for (index, font) in available_fonts.iter().enumerate() {
         let html_template = Arc::clone(&html_template);
         let phrase_assignments = Arc::clone(&phrase_assignments);
         let semaphore = Arc::clone(&semaphore);
         let images = Arc::clone(&images);
-        let task_starts = Arc::clone(&task_starts);
-        // let browser = Arc::clone(&browser);
         let font = font.clone();
         let tx = tx.clone();
+        let browser = Arc::clone(&browser);
 
         let handle = tokio::spawn(async move {
+            // --- Removed task timing ---
             let _permit = semaphore.acquire().await.unwrap();
 
-            // Insert the task start time into the HashMap, protected by the mutex
-            {
-                let mut task_starts = task_starts.lock().unwrap();
-                task_starts.insert(index, Instant::now());
-            }
-
             let result = if let Some(phrases) = phrase_assignments.get(&font) {
-                match process_font(&font, &phrases, &html_template, &images).await {
+                match process_font(&font, &phrases, &html_template, &images, browser).await {
                     Ok(msg) => (true, format!("result: {}", msg)),
                     Err(e) => (false, format!("Error: {}", e)),
                 }
@@ -306,6 +315,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 (false, format!("No phrases assigned to font {}", font))
             };
 
+            // --- Send simplified result ---
             let _ = tx.send((index, result)).await;
         });
 
@@ -313,11 +323,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     let mut completed = 0;
-    let total_tasks = available_fonts.len();
     let mut successful = 0;
     let mut failed = 0;
 
     let printer_handle = tokio::spawn(async move {
+        // --- Receive simplified result ---
         while let Some((index, (success, result))) = rx.recv().await {
             completed += 1;
             if success {
@@ -326,34 +336,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 failed += 1;
             }
 
-            let task_duration = {
-                let task_starts = task_starts.lock().unwrap();
-                task_starts
-                    .get(&index)
-                    .map(|start| start.elapsed())
-                    .unwrap_or_default()
-            };
-
             let progress = (completed as f32 / total_tasks as f32 * 100.0) as u32;
 
-            println!(
-                "({}%) Task {} completed in {:?}s. {}",
-                progress,
-                index + 1,
-                (task_duration.as_secs_f64() * 100.0).round() / 100.0,
-                result
-            );
+            // --- Updated print (no duration) ---
+            println!("({}%) Task {} completed. {}", progress, index + 1, result);
         }
 
         println!("\nSummary:");
         println!("Total tasks completed: {}", completed);
         println!("Successful: {}", successful);
         println!("Failed: {}", failed);
+
+        (completed, successful, failed)
     });
 
-    join_all(handles).await;
+    // Wait for all tasks to finish
+    let join_results = join_all(handles).await;
+
+    // Drop the last sender to close the channel
     drop(tx);
-    printer_handle.await?;
+
+    // Wait for the printer to finish
+    let _ = printer_handle.await?;
+
+    // Check for panics
+    let panic_count = join_results.iter().filter(|res| res.is_err()).count();
+    if panic_count > 0 {
+        eprintln!("\nWarning: {} tasks panicked!", panic_count);
+    }
 
     let elapsed = start.elapsed();
     let minutes = elapsed.as_secs() / 60;
@@ -363,7 +373,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         minutes, seconds
     );
 
-    println!("{}", "All tasks completed!".cyan());
+    println!("{}", "All tasks completed!"); // .cyan()
 
     Ok(())
+}
+
+use tokio::runtime::Builder;
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    // 1. Create a custom runtime Builder
+    let runtime = Builder::new_multi_thread()
+        // 2. Set the desired number of worker threads (e.g., 4)
+        .worker_threads(8)
+        // 3. Optional: Set a custom thread name prefix
+        .thread_name("my-async-worker")
+        .enable_all() // Enable all runtime features (I/O, time, etc.)
+        .build()?; // Build the runtime, returning a Result
+
+    // 4. Block on the execution of your async main function
+    runtime.block_on(async_main())
 }
