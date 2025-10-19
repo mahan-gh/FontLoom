@@ -2,10 +2,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{DynamicImage, GenericImageView, ImageBuffer, ImageOutputFormat, Pixel, Rgb};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use tokio::fs as async_fs;
 
 use std::io::Cursor;
-use std::path::PathBuf;
+use tokio::task;
 
 type Color = (u8, u8, u8);
 
@@ -109,20 +108,23 @@ fn generate_noise_image() -> Result<String, String> {
     ))
 }
 
-async fn select_image(images: &Vec<PathBuf>) -> Result<(image::DynamicImage, u32, u32), String> {
-    let img_path = images.choose(&mut thread_rng()).unwrap();
-    let buffer = async_fs::read(img_path)
-        .await
-        .map_err(|_| "Error reading image file".to_string())?;
+async fn select_image(
+    images: &Vec<Arc<Vec<u8>>>,
+) -> Result<(image::DynamicImage, u32, u32), String> {
+    let buffer = images.choose(&mut thread_rng()).unwrap().clone();
 
-    let img: image::DynamicImage =
-        image::load_from_memory(&buffer).map_err(|e| format!("Failed to load image: {}", e))?;
+    let image_result = task::spawn_blocking(move || image::load_from_memory(&buffer))
+        .await
+        .unwrap();
+
+    let img = image_result.unwrap();
+
     let (width, height) = img.dimensions();
 
     Ok((img, width, height))
 }
 
-async fn generate_background_style(images: &Vec<PathBuf>) -> Result<(String, String), String> {
+async fn generate_background_style(images: &Vec<Arc<Vec<u8>>>) -> Result<(String, String), String> {
     let use_image_bg = thread_rng().gen_bool(0.5);
     let use_overlay = thread_rng().gen_bool(0.3);
 
@@ -250,10 +252,10 @@ fn generate_style_properties() -> String {
     };
 
     let props = [
-        ("skew", 0.5, (-7.0, 7.0), 2),
-        ("rotate", 0.5, (-7.0, 7.0), 2),
-        ("translate", 0.4, (-4.0, 4.0), 2),
-        ("blur", 0.35, (0.0, 0.4), 2),
+        ("skew", 0.5, (-6.0, 6.0), 2),
+        ("rotate", 0.5, (-6.0, 6.0), 2),
+        ("translate", 0.4, (-3.0, 3.0), 2),
+        ("blur", 0.35, (0.0, 0.3), 2),
         ("brightness", 0.4, (0.8, 1.2), 1),
         ("contrast", 0.4, (0.8, 1.2), 1),
     ];
@@ -382,7 +384,7 @@ fn parse_color(color_str: &str) -> Color {
     }
 }
 
-async fn generate_random_styles(images: &Vec<PathBuf>) -> Result<String, String> {
+async fn generate_random_styles(images: &Vec<Arc<Vec<u8>>>) -> Result<String, String> {
     let (bg_style, text_color_hex) = generate_background_style(&images).await?;
 
     let style_properties = generate_style_properties();
@@ -409,12 +411,14 @@ async fn generate_random_styles(images: &Vec<PathBuf>) -> Result<String, String>
     Ok(styles + &noise_style)
 }
 
+use std::sync::Arc;
+
 pub async fn create_html_content(
     font_name: &str,
     template: &str,
     phrase: &str,
     base64_font: &str,
-    images: &Vec<PathBuf>,
+    images: &Vec<Arc<Vec<u8>>>,
     method: Option<&str>,
 ) -> Result<String, String> {
     let styles = match method {

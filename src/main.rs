@@ -20,7 +20,6 @@ use tokio::sync::{Mutex, Semaphore};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -111,12 +110,12 @@ fn assign_phrases_to_fonts(
     assignments
 }
 
-async fn get_image_paths() -> Result<Vec<PathBuf>, String> {
+async fn get_image_buffers() -> Result<Vec<Arc<Vec<u8>>>, String> {
     let mut entries = async_fs::read_dir(IMAGE_FOLDER)
         .await
         .map_err(|_| format!("Error reading folder '{}'", IMAGE_FOLDER))?;
 
-    let mut images = Vec::new();
+    let mut image_buffers = Vec::new();
 
     while let Some(entry) = entries
         .next_entry()
@@ -125,20 +124,27 @@ async fn get_image_paths() -> Result<Vec<PathBuf>, String> {
     {
         let path = entry.path();
         if path.is_file() {
-            images.push(path);
+            // Read the entire file into a buffer
+            let mut file = AsyncFile::open(&path)
+                .await
+                .map_err(|e| format!("Error opening file {:?}: {}", path, e))?;
+
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)
+                .await
+                .map_err(|e| format!("Error reading file {:?}: {}", path, e))?;
+
+            image_buffers.push(Arc::from(buffer));
         }
     }
 
-    if images.is_empty() {
+    if image_buffers.is_empty() {
         return Err("No images found in folder.".to_string());
     }
 
-    Ok(images)
+    Ok(image_buffers)
 }
 
-// A simple async tab pool that pre-creates a fixed number of tabs and
-// hands them out to tasks. Tabs are returned to the pool when the lease
-// is dropped.
 struct TabPool {
     // We protect the vector with a mutex because taking/returning a tab is fast
     // and does not require async operations.
@@ -200,7 +206,7 @@ impl TabPool {
             recreating: self.recreating.clone(),
         };
 
-        let mut manager = self.browser_manager.lock().await;
+        let manager = self.browser_manager.lock().await;
         let browser = manager.get_or_create_browser().unwrap();
 
         let mut new_tabs = Vec::with_capacity(self.capacity);
@@ -359,7 +365,7 @@ async fn process_font(
     font: &str,
     phrase_assignments: &Vec<String>,
     html_template: &String,
-    images: &Vec<PathBuf>,
+    images: &Vec<Arc<Vec<u8>>>,
     tab_pool: Arc<TabPool>,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let font_dir = format!("{}/{}", FONTS_DIR, font);
@@ -433,19 +439,19 @@ async fn async_main() -> Result<(), Box<dyn Error + Send + Sync>> {
         get_available_fonts(FONTS_DIR),
         async_fs::read_to_string(TEMPLATE_PATH),
         load_phrases(PHRASES_PATH),
-        get_image_paths()
+        get_image_buffers()
     );
 
     let available_fonts = fonts_result?;
     let html_template = template_result?;
     let phrase_list = phrases_result?;
-    let images = images_result?;
+    let image_buffers = images_result?;
 
     recreate_output_dir(OUTPUT_DIR, &available_fonts).await?;
     let phrase_assignments: HashMap<String, Vec<String>> =
         assign_phrases_to_fonts(&available_fonts, &phrase_list, IMAGES_PER_FONT);
 
-    let images = Arc::new(images);
+    let image_buffers = Arc::new(image_buffers);
     let html_template = Arc::new(html_template);
     let available_fonts = Arc::new(available_fonts);
     let phrase_assignments = Arc::new(phrase_assignments);
@@ -460,7 +466,7 @@ async fn async_main() -> Result<(), Box<dyn Error + Send + Sync>> {
     for (index, font) in available_fonts.iter().enumerate() {
         let html_template = Arc::clone(&html_template);
         let phrase_assignments = Arc::clone(&phrase_assignments);
-        let images = Arc::clone(&images);
+        let image_buffers = Arc::clone(&image_buffers);
         let font = font.clone();
         let tx = tx.clone();
         // let browser = Arc::clone(&browser);
@@ -468,7 +474,8 @@ async fn async_main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
         let handle = tokio::spawn(async move {
             let result = if let Some(phrases) = phrase_assignments.get(&font) {
-                match process_font(&font, &phrases, &html_template, &images, tab_pool).await {
+                match process_font(&font, &phrases, &html_template, &image_buffers, tab_pool).await
+                {
                     Ok(msg) => (true, format!("result: {}", msg)),
                     Err(e) => (false, format!("Error: {}", e)),
                 }

@@ -1,12 +1,10 @@
 use headless_chrome::{Browser, LaunchOptions};
 
 use std::ffi::OsStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 
-const BROWSER_IDLE_TIME: Duration = Duration::from_secs(5);
+const BROWSER_IDLE_TIME: Duration = Duration::from_secs(10);
 
 use anyhow;
 
