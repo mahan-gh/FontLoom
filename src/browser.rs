@@ -1,10 +1,13 @@
 use headless_chrome::{Browser, LaunchOptions};
 
 use std::ffi::OsStr;
+// use std::path::PathBuf;
+// use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const BROWSER_IDLE_TIME: Duration = Duration::from_secs(10);
+const BROWSER_IDLE_TIME: Duration = Duration::from_secs(3000);
+// const CHROME_PATH: &str = "../chromium/chrome.exe";
 
 use anyhow;
 
@@ -46,7 +49,7 @@ impl BrowserManager {
 
         if let Some(ref browser) = *browser_lock {
             if self.is_browser_connected(browser) {
-                println!("Browser connected, returning existing instance");
+                // println!("Browser connected, returning existing instance");
                 return Ok(browser.clone());
             } else {
                 println!("Browser disconnected, creating new instance");
@@ -62,15 +65,18 @@ impl BrowserManager {
     }
 
     /// Create a new browser instance with specified options
-    fn create_browser(&self) -> Result<Browser, AppError> {
+    pub fn create_browser(&self) -> Result<Browser, AppError> {
+        // let chromium_path = PathBuf::from_str(CHROME_PATH).expect("chrome path is not valid");
+
         let launch_options = LaunchOptions::default_builder()
+            // .path(Some(chromium_path))
             .headless(true)
             .idle_browser_timeout(BROWSER_IDLE_TIME)
             .sandbox(false)
             .args(vec![
                 OsStr::new("--incognito"),
                 OsStr::new("--hide-scrollbars"),
-                OsStr::new("--disable-gpu"),
+                // OsStr::new("--disable-gpu"),
                 OsStr::new("--no-first-run"),
                 OsStr::new("--no-default-browser-check"),
             ])

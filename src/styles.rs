@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{DynamicImage, GenericImageView, ImageBuffer, ImageOutputFormat, Pixel, Rgb};
 use rand::seq::SliceRandom;
@@ -68,7 +70,7 @@ fn ensure_wcag_contrast(bg_color: &Color, text_color: &Color, ratio: &f64) -> bo
 
 fn calc_mean_image(buffer: &[u8]) -> Result<Color, String> {
     let img =
-        image::load_from_memory(buffer).map_err(|e| (format!("Failed to load image: {}", e)))?;
+        image::load_from_memory(buffer).map_err(|e| format!("Failed to load image: {}", e))?;
     let (r_sum, g_sum, b_sum, pixel_count) = img.pixels().fold(
         (0u64, 0u64, 0u64, 0u64),
         |(r, g, b, count), (_, _, pixel)| {
@@ -255,7 +257,7 @@ fn generate_style_properties() -> String {
         ("skew", 0.5, (-6.0, 6.0), 2),
         ("rotate", 0.5, (-6.0, 6.0), 2),
         ("translate", 0.4, (-3.0, 3.0), 2),
-        ("blur", 0.35, (0.0, 0.3), 2),
+        ("blur", 0.33, (0.0, 0.3), 2),
         ("brightness", 0.4, (0.8, 1.2), 1),
         ("contrast", 0.4, (0.8, 1.2), 1),
     ];
@@ -297,7 +299,7 @@ fn generate_style_properties() -> String {
 
     let width = thread_rng().gen_range(250..=600);
     let height = thread_rng().gen_range(200..=450);
-    let font_size = thread_rng().gen_range(32..=100);
+    let font_size = thread_rng().gen_range(36..=100);
     let text_align = ["center", "left", "right"]
         .choose(&mut thread_rng())
         .unwrap();
@@ -411,8 +413,6 @@ async fn generate_random_styles(images: &Vec<Arc<Vec<u8>>>) -> Result<String, St
     Ok(styles + &noise_style)
 }
 
-use std::sync::Arc;
-
 pub async fn create_html_content(
     font_name: &str,
     template: &str,
@@ -429,7 +429,7 @@ pub async fn create_html_content(
             if thread_rng().gen_range(1..8) == 5 {
                 &format!(
                     "background-color: white; color: black; text-align: center; font-size: {}px;",
-                    thread_rng().gen_range(12..60)
+                    thread_rng().gen_range(24..60)
                 )
             } else {
                 &match generate_random_styles(&images).await {
